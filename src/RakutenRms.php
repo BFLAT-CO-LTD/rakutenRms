@@ -262,7 +262,7 @@ class RakutenRms
         $headerArray[] = 'Authorization: ' . $this->authHeader();
         $headerArray[] = 'Accept-encoding: gzip, deflate, identity';
         $ch = curl_init();
-        if(empty($requestType)) {
+        if (empty($requestType)) {
             curl_setopt($ch, CURLOPT_POST, $post);
         } else {
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $requestType);
@@ -300,8 +300,74 @@ class RakutenRms
             curl_setopt($ch, CURLOPT_PROXYPORT, $this->curloptProxyPort);
             curl_setopt($ch, CURLOPT_PROXYUSERPWD, $this->curloptProxyUserpwd);
         }
+
+        //ヘッダーDEBUG用
+        curl_setopt($ch, CURLINFO_HEADER_OUT, true);
+
+        //curl実行
         $output = curl_exec($ch);
         $error = curl_error($ch);
+
+        // [ADDED] 送信時の request_header を取得
+        //擬似的にRequest Bodyを作成して検証
+        $info = curl_getinfo($ch);
+        $rawReqHeaders = isset($info['request_header']) ? $info['request_header'] : '';
+        $multipartSkeleton = '';
+        if ($type == ApiDefine::REQUEST_XML_FILE && is_array($params)) {
+            // boundary をヘッダーから抽出
+            $boundary = null;
+            if (preg_match('/Content-Type:\s*multipart\/form-data;\s*boundary=([^\s;]+)/i', $rawReqHeaders, $m)) {
+                $boundary = trim($m[1], "\"'");
+            }
+
+            // skeleton を作る（boundary が取れない場合はヘッダのみ出力）
+            $lines = [];
+            if ($boundary) {
+                foreach ($params as $name => $val) {
+                    $lines[] = "--{$boundary}";
+                    if ($val instanceof \CURLFile) {
+                        // 可能な範囲でファイル名・MIME・サイズを推定
+                        $srcPath = method_exists($val, 'getFilename') ? $val->getFilename() : (property_exists($val, 'name') ? $val->name : null);
+                        $postName = (method_exists($val, 'getPostFilename') && $val->getPostFilename())
+                            ? $val->getPostFilename()
+                            : ($srcPath ? basename($srcPath) : 'file');
+                        $mime = (method_exists($val, 'getMimeType') && $val->getMimeType())
+                            ? $val->getMimeType()
+                            : (property_exists($val, 'mime') ? $val->mime : 'application/octet-stream');
+                        $size = ($srcPath && @is_file($srcPath)) ? @filesize($srcPath) : 0;
+
+                        $lines[] = sprintf('Content-Disposition: form-data; name="%s"; filename="%s"', $name, $postName);
+                        $lines[] = sprintf('Content-Type: %s', $mime);
+                        $lines[] = sprintf('Content-Length: %d', (int)$size);
+                        $lines[] = '';
+                        $lines[] = sprintf('[[binary payload omitted: %d bytes]]', (int)$size);
+                    } else {
+                        $str = (string)$val;
+                        $len = strlen($str);
+                        $lines[] = sprintf('Content-Disposition: form-data; name="%s"', $name);
+                        // 実線では付かない場合もあるが、検証用に明示
+                        $lines[] = 'Content-Type: text/plain; charset=UTF-8  //擬似要素';
+                        $lines[] = sprintf('Content-Length: %d', (int)$len);
+                        $lines[] = '';
+                        // 本文は出力しない
+                        $lines[] = sprintf('[[text payload omitted: %d bytes]]', (int)$len);
+                    }
+                }
+                $lines[] = "--{$boundary}--";
+                $multipartSkeleton = implode("\r\n", $lines);
+            } else {
+                $multipartSkeleton = "[boundary not found in request headers]\n" . $rawReqHeaders;
+            }
+
+            if (!empty($rawReqHeaders)) {
+                logger()->debug("[REQUEST HEADERS]\n" . $rawReqHeaders);
+            }
+
+            // [ADDED] multipart の各パートのヘッダー（本文は出さない）をログ
+            if (!empty($multipartSkeleton)) {
+                logger()->debug("[MULTIPART SKELETON - headers only]\n" . $multipartSkeleton);
+            }
+        }
 
         if (!empty($this->logFile)) {
             $date = '[' . date('Y-m-d H:i:s') . "]: \n";
