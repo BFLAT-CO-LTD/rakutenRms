@@ -301,13 +301,14 @@ class RakutenRms
             curl_setopt($ch, CURLOPT_PROXYUSERPWD, $this->curloptProxyUserpwd);
         }
 
-        //ヘッダーDEBUG用
-        curl_setopt($ch, CURLINFO_HEADER_OUT, true);
+        //ヘッダーDEBUG用（認証情報のログ出力を防ぐため無効化）
+        // curl_setopt($ch, CURLINFO_HEADER_OUT, true);
 
         //curl実行
         $output = curl_exec($ch);
         $error = curl_error($ch);
 
+        /* 認証情報のログ出力を防ぐため、以下のデバッグ処理を無効化。
         // [ADDED] 送信時の request_header を取得
         //擬似的にRequest Bodyを作成して検証
         $info = curl_getinfo($ch);
@@ -368,6 +369,7 @@ class RakutenRms
                 logger()->debug("[MULTIPART SKELETON - headers only]\n" . $multipartSkeleton);
             }
         }
+        */
 
         if (!empty($this->logFile)) {
             $date = '[' . date('Y-m-d H:i:s') . "]: \n";
